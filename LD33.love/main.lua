@@ -2,7 +2,7 @@ require "vectors"
 
 local world
 
-local leftWall, you, shore, youJoint
+local leftWall, you, youJoint
 local boats = {}
 
 local elapsedTime = 0
@@ -19,29 +19,32 @@ local boatImage
 local playing = false
 local gameOver = false
 
+local isGrabbing = false
+local grabbedBoats = {}
+
 WALL_THICKNESS = 40
 SHORE_WIDTH = 220
-BOAT_CATEGORY = 3
+SIDE_CATEGORY = 3
 YOU_CATEGORY = 4
+BOAT_CATEGORY = 5
 STARTING_POSITION = v(0, 0) -- calculated below from window dimensions
 YOU_SPEED = 400
 YOU_MINIMUM_SPEED = 120
-YOU_RADIUS = 24
-BOAT_SPEED = 100
+YOU_RADIUS = 18
+BOAT_SPEED = 200
+BOAT_ACCELERATION = 0.2 -- multiplied by max speed
+GRAB_DISTANCE = 40
+GRAB_HOLD_DISTANCE = GRAB_DISTANCE * .5
 
 local function contactBegan(fixture1, fixture2, contact)
-	if either(shore.fixture, fixture1, fixture2) then
-		-- boat got to shore!
-	else
-		for i = 1, #boats do
-			local boat = boats[i]
-			if either(boat.fixture, fixture1, fixture2) then
-				-- boat hit something! was it a boat?
-				for j = 1, #boats do
-					local otherBoat = boats[j]
-					if either(otherBoat.fixture, fixture1, fixture2) then
-						-- yes! TODO: damage based on speed
-					end
+	for i = 1, #boats do
+		local boat = boats[i]
+		if either(boat.fixture, fixture1, fixture2) then
+			-- boat hit something! was it a boat?
+			for j = 1, #boats do
+				local otherBoat = boats[j]
+				if either(otherBoat.fixture, fixture1, fixture2) then
+					-- yes! TODO: damage based on speed
 				end
 			end
 		end
@@ -74,14 +77,14 @@ function love.load()
 	leftWall.shape = love.physics.newRectangleShape(WALL_THICKNESS, h * 1.5)
 	leftWall.body = love.physics.newBody(world, WALL_THICKNESS / 2, h / 2)
 	leftWall.fixture = love.physics.newFixture(leftWall.body, leftWall.shape)
-	leftWall.fixture:setCategory(BOAT_CATEGORY)
+	leftWall.fixture:setCategory(SIDE_CATEGORY)
 	leftWall.fixture:setRestitution(1)
 
 	local rightWall = {}
 	rightWall.shape = love.physics.newRectangleShape(WALL_THICKNESS, h * 1.5)
 	rightWall.body = love.physics.newBody(world, w - SHORE_WIDTH + WALL_THICKNESS / 2, h / 2)
 	rightWall.fixture = love.physics.newFixture(rightWall.body, rightWall.shape)
-	rightWall.fixture:setCategory(BOAT_CATEGORY)
+	rightWall.fixture:setCategory(SIDE_CATEGORY)
 	rightWall.fixture:setRestitution(1)
 
 	local floor = {}
@@ -105,16 +108,10 @@ function love.load()
 
 	youJoint = love.physics.newMouseJoint(you.body, 0, 0)
 
-	shore = {}
-	shore.shape = love.physics.newRectangleShape(SHORE_WIDTH - WALL_THICKNESS / 2, h)
-	shore.body = love.physics.newBody(world, w - SHORE_WIDTH / 2 + WALL_THICKNESS / 2, h / 2)
-	shore.fixture = love.physics.newFixture(shore.body, shore.shape)
-	shore.fixture:setSensor(true)
-
 	-- get gameplay stuff ready
 
-	for i = 1, 3 do
-		boats[#boats + 1] = makeBoat(100, 2 * WALL_THICKNESS + math.random() * (h - 2 * WALL_THICKNESS))
+	for i = 1, 5 do
+		boats[#boats + 1] = makeBoat(80 + math.random() * 150, 2 * WALL_THICKNESS + math.random() * (h - 2 * WALL_THICKNESS))
 	end
 
 	reset()
@@ -184,7 +181,15 @@ function love.update(dt)
 		-- boat movement
 		for i = 1, #boats do
 			local boat = boats[i]
-
+			local boatPosition = v(boat.body:getX(), boat.body:getY())
+			if boat.moveJoint ~= nil then
+				local speed = boat.speed
+				if speed < BOAT_SPEED then
+					speed = speed + (BOAT_SPEED * BOAT_ACCELERATION * dt)
+					boat.speed = speed
+				end
+				boat.moveJoint:setTarget(boatPosition.x + boat.speed * dt, boatPosition.y)
+			end
 		end
 
 		world:update(dt)
@@ -196,15 +201,17 @@ function makeBoat(x, y)
 	boat.shape = love.physics.newCircleShape(20)
 	boat.body = love.physics.newBody(world, x, y, "dynamic")
 	boat.fixture = love.physics.newFixture(boat.body, boat.shape)
-	boat.fixture:setMask(BOAT_CATEGORY, YOU_CATEGORY)
-	setBoatMoveJointActive(boat, true)
+	boat.fixture:setMask(BOAT_CATEGORY, SIDE_CATEGORY, YOU_CATEGORY)
+	boat.speed = 0
+	setBoatMoving(boat, true)
 	return boat
 end
 
-function setBoatMoveJointActive(boat, active)
-	if boat.moveJoint == nil and active then
+function setBoatMoving(boat, moving)
+	if boat.moveJoint == nil and moving then
+		boat.speed = 0
 		boat.moveJoint = love.physics.newMouseJoint(boat.body, boat.body:getX(), boat.body:getY())
-	elseif boat.moveJoint ~= nil and not active then
+	elseif boat.moveJoint ~= nil and not moving then
 		boat.moveJoint:destroy()
 		boat.moveJoint = nil
 	end
@@ -235,6 +242,39 @@ end
 
 function start()
 	playing = true
+end
+
+function love.keypressed(key, isRepeat)
+	if not isGrabbing then
+		isGrabbing = true
+		grabbedBoats = {}
+		for i = 1, #boats do
+			local boat = boats[i]
+			local boatPosition = v(boat.body:getX(), boat.body:getY())
+			local youPosition = v(you.body:getX(), you.body:getY())
+			local boatDistance = vDist(boatPosition, youPosition)
+			if boatDistance < GRAB_DISTANCE then
+				setBoatMoving(boat, false)
+				local grabPosition = vMix(youPosition, boatPosition, GRAB_HOLD_DISTANCE / boatDistance)
+				local grabJoint = love.physics.newDistanceJoint(you.body, boat.body, grabPosition.x, grabPosition.y, boatPosition.x, boatPosition.y)
+				boat.grabJoint = grabJoint
+				grabbedBoats[#grabbedBoats + 1] = boat
+			end
+		end
+	end
+end
+
+function love.keyreleased(key, isRepeat)
+	if isGrabbing then
+		isGrabbing = false
+		for i = 1, #grabbedBoats do
+			local boat = grabbedBoats[i]
+			boat.grabJoint:destroy()
+			boat.grabJoint = nil
+			setBoatMoving(boat, true)
+		end
+		grabbedBoats = {}
+	end
 end
 
 function love.mousepressed(x, y, button)
