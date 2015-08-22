@@ -14,6 +14,7 @@ local scoreChangedTime = -1
 local targetPosition = nil
 
 local backgroundImage
+local boatImage
 
 local playing = false
 local gameOver = false
@@ -21,14 +22,29 @@ local gameOver = false
 WALL_THICKNESS = 40
 SHORE_WIDTH = 220
 BOAT_CATEGORY = 3
+YOU_CATEGORY = 4
 STARTING_POSITION = v(0, 0) -- calculated below from window dimensions
 YOU_SPEED = 400
 YOU_MINIMUM_SPEED = 120
 YOU_RADIUS = 24
+BOAT_SPEED = 100
 
 local function contactBegan(fixture1, fixture2, contact)
 	if either(shore.fixture, fixture1, fixture2) then
 		-- boat got to shore!
+	else
+		for i = 1, #boats do
+			local boat = boats[i]
+			if either(boat.fixture, fixture1, fixture2) then
+				-- boat hit something! was it a boat?
+				for j = 1, #boats do
+					local otherBoat = boats[j]
+					if either(otherBoat.fixture, fixture1, fixture2) then
+						-- yes! TODO: damage based on speed
+					end
+				end
+			end
+		end
 	end
 	-- note: don’t remove objects in physics callback
 end
@@ -38,6 +54,7 @@ function love.load()
 	math.randomseed(os.time())
 
 	backgroundImage = love.graphics.newImage("graphics/background.png")
+	boatImage = love.graphics.newImage("graphics/boat.png")
 
 	-- fonts
 
@@ -83,6 +100,7 @@ function love.load()
 	you.shape = love.physics.newCircleShape(30)
 	you.body = love.physics.newBody(world, 0, 0, "dynamic") -- 0,0 for now — reset() is responsible for the actual starting position
 	you.fixture = love.physics.newFixture(you.body, you.shape)
+	you.fixture:setCategory(YOU_CATEGORY)
 	you.fixture:setRestitution(0.9)
 
 	youJoint = love.physics.newMouseJoint(you.body, 0, 0)
@@ -95,7 +113,9 @@ function love.load()
 
 	-- get gameplay stuff ready
 
-	boats[#boats + 1] = makeBoat(200, 100)
+	for i = 1, 3 do
+		boats[#boats + 1] = makeBoat(100, 2 * WALL_THICKNESS + math.random() * (h - 2 * WALL_THICKNESS))
+	end
 
 	reset()
 end
@@ -109,19 +129,20 @@ function love.draw()
 
 		love.graphics.setColor(0, 0, 0, 255)
 		-- player
-		-- ships
-		-- ship labels
-		-- score etc.
 		love.graphics.circle("fill", you.body:getX(), you.body:getY(), YOU_RADIUS, 40)
 
+		local boatImageWidth, boatImageHeight = boatImage:getDimensions()
+		-- boats
 		for i = 1, #boats do
 			local boat = boats[i]
 			love.graphics.push()
 			love.graphics.translate(boat.body:getX(), boat.body:getY())
-			-- TODO: rotate for tilting, maybe based on the boat’s speed
-			love.graphics.rectangle("fill", -24, -15, 48, 30)
+			-- TODO: labels (pre-rotation)
+			love.graphics.draw(boatImage, -boatImageWidth / 2, -boatImageHeight / 2, 0, 1) -- x, y, rotation, scale
 			love.graphics.pop()
 		end
+
+		-- TODO: score etc.
 	else
 		-- either title screen or end-game state
 		if not gameOver then
@@ -136,6 +157,7 @@ function love.update(dt)
 	elapsedTime = elapsedTime + dt
 
 	if playing then
+		-- player movement
 		local currentPositionX, currentPositionY = youJoint:getTarget()
 		local currentPosition = v(currentPositionX, currentPositionY)
 		local newPosition = currentPosition
@@ -157,8 +179,13 @@ function love.update(dt)
 		else
 			-- TODO: deceleration, using delta between current position and last-frame position as starting velocity
 		end
-		
 		youJoint:setTarget(newPosition.x, newPosition.y)
+
+		-- boat movement
+		for i = 1, #boats do
+			local boat = boats[i]
+
+		end
 
 		world:update(dt)
 	end
@@ -169,8 +196,18 @@ function makeBoat(x, y)
 	boat.shape = love.physics.newCircleShape(20)
 	boat.body = love.physics.newBody(world, x, y, "dynamic")
 	boat.fixture = love.physics.newFixture(boat.body, boat.shape)
-	boat.fixture:setMask(BOAT_CATEGORY)
+	boat.fixture:setMask(BOAT_CATEGORY, YOU_CATEGORY)
+	setBoatMoveJointActive(boat, true)
 	return boat
+end
+
+function setBoatMoveJointActive(boat, active)
+	if boat.moveJoint == nil and active then
+		boat.moveJoint = love.physics.newMouseJoint(boat.body, boat.body:getX(), boat.body:getY())
+	elseif boat.moveJoint ~= nil and not active then
+		boat.moveJoint:destroy()
+		boat.moveJoint = nil
+	end
 end
 
 function clearBoats()
