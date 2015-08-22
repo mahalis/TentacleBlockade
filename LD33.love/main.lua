@@ -3,6 +3,7 @@ require "vectors"
 local world
 
 local leftWall, you, shore, youJoint
+local boats = {}
 
 local elapsedTime = 0
 
@@ -19,7 +20,7 @@ local gameOver = false
 
 WALL_THICKNESS = 40
 SHORE_WIDTH = 220
-SHIP_CATEGORY = 3
+BOAT_CATEGORY = 3
 STARTING_POSITION = v(0, 0) -- calculated below from window dimensions
 YOU_SPEED = 400
 YOU_MINIMUM_SPEED = 120
@@ -30,11 +31,6 @@ local function contactBegan(fixture1, fixture2, contact)
 		-- boat got to shore!
 	end
 	-- note: don’t remove objects in physics callback
-end
-
-function either(thing, one, two)
-	if thing == one or thing == two then return true end
-	return false
 end
 
 function love.load()
@@ -61,14 +57,14 @@ function love.load()
 	leftWall.shape = love.physics.newRectangleShape(WALL_THICKNESS, h * 1.5)
 	leftWall.body = love.physics.newBody(world, WALL_THICKNESS / 2, h / 2)
 	leftWall.fixture = love.physics.newFixture(leftWall.body, leftWall.shape)
-	leftWall.fixture:setCategory(SHIP_CATEGORY)
+	leftWall.fixture:setCategory(BOAT_CATEGORY)
 	leftWall.fixture:setRestitution(1)
 
 	local rightWall = {}
 	rightWall.shape = love.physics.newRectangleShape(WALL_THICKNESS, h * 1.5)
 	rightWall.body = love.physics.newBody(world, w - SHORE_WIDTH + WALL_THICKNESS / 2, h / 2)
 	rightWall.fixture = love.physics.newFixture(rightWall.body, rightWall.shape)
-	rightWall.fixture:setCategory(SHIP_CATEGORY)
+	rightWall.fixture:setCategory(BOAT_CATEGORY)
 	rightWall.fixture:setRestitution(1)
 
 	local floor = {}
@@ -99,6 +95,8 @@ function love.load()
 
 	-- get gameplay stuff ready
 
+	boats[#boats + 1] = makeBoat(200, 100)
+
 	reset()
 end
 
@@ -115,6 +113,15 @@ function love.draw()
 		-- ship labels
 		-- score etc.
 		love.graphics.circle("fill", you.body:getX(), you.body:getY(), YOU_RADIUS, 40)
+
+		for i = 1, #boats do
+			local boat = boats[i]
+			love.graphics.push()
+			love.graphics.translate(boat.body:getX(), boat.body:getY())
+			-- TODO: rotate for tilting, maybe based on the boat’s speed
+			love.graphics.rectangle("fill", -24, -15, 48, 30)
+			love.graphics.pop()
+		end
 	else
 		-- either title screen or end-game state
 		if not gameOver then
@@ -157,17 +164,35 @@ function love.update(dt)
 	end
 end
 
+function makeBoat(x, y)
+	local boat = {}
+	boat.shape = love.physics.newCircleShape(20)
+	boat.body = love.physics.newBody(world, x, y, "dynamic")
+	boat.fixture = love.physics.newFixture(boat.body, boat.shape)
+	boat.fixture:setMask(BOAT_CATEGORY)
+	return boat
+end
+
+function clearBoats()
+	for i = 1, #boats do
+		local boat = boats[i]
+		boat.fixture:destroy()
+		boat.body:destroy()
+	end
+	boats = {}
+end
+
 function reset()
 	score = 0
 
 	playing = false
 	gameOver = false
 	elapsedTime = 0
-	titleStartTime = elapsedTime
-	youVelocity = v(0,0)
+	
 	youJoint:setTarget(STARTING_POSITION.x, STARTING_POSITION.y)
 	you.body:setX(STARTING_POSITION.x)
 	you.body:setY(STARTING_POSITION.y)
+	
 	targetPosition = nil
 end
 
@@ -189,6 +214,7 @@ end
 
 function love.mousereleased(x, y, button)
 	if playing and targetPosition == nil then
+		-- update uses this as a signal for whether it should actually set a position while the mouse is down
 		targetPosition = STARTING_POSITION
 	end
 end
@@ -198,18 +224,15 @@ function mixColors(a, b, f)
 	return {a[1] + f * (b[1] - a[1]), a[2] + f * (b[2] - a[2]), a[3] + f * (b[3] - a[3])}
 end
 
--- mix two values along the curve used for title stuff
-function titleInterpolate(a, b, f)
-	f = math.max(0, math.min(1, f))
-	return a + (b - a) * (1 - math.pow(1 - f, 5))
-end
-
-function vectorLine(from, to)
-	love.graphics.line(from.x, from.y, to.x, to.y)
-end
-
+-- sine-curve interpolation
 function slerp(a, b, f)
 	f = math.max(math.min(f, 1), 0)
 
 	return a + (b - a) * (1 - math.cos(f * math.pi)) / 2
 end
+
+function either(thing, one, two)
+	if thing == one or thing == two then return true end
+	return false
+end
+
