@@ -35,6 +35,8 @@ BOAT_SPEED = 200
 BOAT_ACCELERATION = 0.2 -- multiplied by max speed
 GRAB_DISTANCE = 40
 GRAB_HOLD_DISTANCE = GRAB_DISTANCE * .5
+BOAT_RECOVER_SPEED = 10
+BOAT_IMPACT_THRESHOLD = 60
 
 local function contactBegan(fixture1, fixture2, contact)
 	for i = 1, #boats do
@@ -45,6 +47,12 @@ local function contactBegan(fixture1, fixture2, contact)
 				local otherBoat = boats[j]
 				if either(otherBoat.fixture, fixture1, fixture2) then
 					-- yes! TODO: damage based on speed
+					local boatVelocityX, boatVelocityY = boat.body:getLinearVelocity()
+					local otherBoatVelocityX, otherBoatVelocityY = otherBoat.body:getLinearVelocity()
+					if vLen(vSub(v(boatVelocityX, boatVelocityY), v(otherBoatVelocityX, otherBoatVelocityY))) > 100 then
+						damageBoat(boat)
+						damageBoat(otherBoat)
+					end
 				end
 			end
 		end
@@ -134,8 +142,18 @@ function love.draw()
 			local boat = boats[i]
 			love.graphics.push()
 			love.graphics.translate(boat.body:getX(), boat.body:getY())
+
+			love.graphics.setColor(0,0,0,255)
+			-- temporary health bar
+			love.graphics.rectangle("line", -30, -40, 60, 6)
+			love.graphics.rectangle("fill", -30, -40, 60 * (boat.health / 20), 6)
+			
 			-- TODO: labels (pre-rotation)
+			local damageFactor = 1 - math.max(0,math.min(1,(elapsedTime - boat.healthChangedTime) / 0.5))
+
+			love.graphics.setColor(damageFactor * 100,0,0,255)
 			love.graphics.draw(boatImage, -boatImageWidth / 2, -boatImageHeight / 2, 0, 1) -- x, y, rotation, scale
+
 			love.graphics.pop()
 		end
 
@@ -182,13 +200,18 @@ function love.update(dt)
 		for i = 1, #boats do
 			local boat = boats[i]
 			local boatPosition = v(boat.body:getX(), boat.body:getY())
-			if boat.moveJoint ~= nil then
+			if boat.isGrabbed == false and boat.moveJoint ~= nil then
 				local speed = boat.speed
 				if speed < BOAT_SPEED then
 					speed = speed + (BOAT_SPEED * BOAT_ACCELERATION * dt)
 					boat.speed = speed
 				end
 				boat.moveJoint:setTarget(boatPosition.x + boat.speed * dt, boatPosition.y)
+			else
+				local boatVelocityX, boatVelocityY = boat.body:getLinearVelocity()
+				if vLen(v(boatVelocityX, boatVelocityY)) < BOAT_RECOVER_SPEED then
+					setBoatMoving(boat, true)
+				end
 			end
 		end
 
@@ -200,9 +223,13 @@ function makeBoat(x, y)
 	local boat = {}
 	boat.shape = love.physics.newCircleShape(20)
 	boat.body = love.physics.newBody(world, x, y, "dynamic")
+	boat.body:setLinearDamping(0.6)
 	boat.fixture = love.physics.newFixture(boat.body, boat.shape)
 	boat.fixture:setMask(BOAT_CATEGORY, SIDE_CATEGORY, YOU_CATEGORY)
 	boat.speed = 0
+	boat.health = 20
+	boat.healthChangedTime = -60
+	boat.isGrabbed = false
 	setBoatMoving(boat, true)
 	return boat
 end
@@ -215,6 +242,13 @@ function setBoatMoving(boat, moving)
 		boat.moveJoint:destroy()
 		boat.moveJoint = nil
 	end
+end
+
+function damageBoat(boat)
+	boat.health = math.max(0, boat.health - 1)
+	boat.healthChangedTime = elapsedTime
+	boat.speed = 0
+	-- we don’t remove the boat here because it ain’t safe — this is called from the physics callback. 
 end
 
 function clearBoats()
@@ -258,6 +292,7 @@ function love.keypressed(key, isRepeat)
 				local grabPosition = vMix(youPosition, boatPosition, GRAB_HOLD_DISTANCE / boatDistance)
 				local grabJoint = love.physics.newDistanceJoint(you.body, boat.body, grabPosition.x, grabPosition.y, boatPosition.x, boatPosition.y)
 				boat.grabJoint = grabJoint
+				boat.isGrabbed = true
 				grabbedBoats[#grabbedBoats + 1] = boat
 			end
 		end
@@ -271,7 +306,7 @@ function love.keyreleased(key, isRepeat)
 			local boat = grabbedBoats[i]
 			boat.grabJoint:destroy()
 			boat.grabJoint = nil
-			setBoatMoving(boat, true)
+			boat.isGrabbed = false
 		end
 		grabbedBoats = {}
 	end
