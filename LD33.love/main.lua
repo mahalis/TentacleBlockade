@@ -43,7 +43,7 @@ SHORE_WIDTH = 220
 SIDE_CATEGORY = 3
 YOU_CATEGORY = 4
 BOAT_CATEGORY = 5
-STARTING_POSITION = v(530, 280) -- calculated below from window dimensions
+STARTING_POSITION = v(610, 280)
 YOU_SPEED = 600
 YOU_MINIMUM_SPEED = 200
 YOU_GRABBING_SPEED_MULTIPLIER = 0.7
@@ -191,7 +191,7 @@ function love.draw()
 	local shakeAmount = math.min(1, math.max(0, (elapsedTime - lastLandingTime) / SCREEN_SHAKE_DURATION))
 	if shakeAmount > 0 and shakeAmount < 1 then
 		local amplitude = .02
-		local scale = 1 + (math.sin(shakeAmount * 12) * .5 + .5) * amplitude * (1 - shakeAmount)
+		local scale = 1 + (math.sin(shakeAmount * 9) * .5 + .5) * amplitude * (1 - shakeAmount)
 		love.graphics.translate(w * (1 - scale) * .5, h * (1 - scale) * .5)
 		love.graphics.scale(scale, scale)
 	end
@@ -555,11 +555,19 @@ function reduceDesperation()
 	if desperationLevel - amount < 0.01 then
 		desperationLevel = 0
 		endGame()
-		-- end game
 	else
 		desperationLevel = desperationLevel - amount
 		lastLandingTime = elapsedTime
 	end
+end
+
+function resetYou(position)
+	if position == nil then position = STARTING_POSITION end
+	youJoint:setTarget(position.x, position.y)
+	you.body:setX(position.x)
+	you.body:setY(position.y)
+	
+	targetPosition = nil
 end
 
 function reset()
@@ -569,11 +577,7 @@ function reset()
 	desperationLevel = MAX_DESPERATION
 	lastLandingTime = -SCREEN_SHAKE_DURATION
 	
-	youJoint:setTarget(STARTING_POSITION.x, STARTING_POSITION.y)
-	you.body:setX(STARTING_POSITION.x)
-	you.body:setY(STARTING_POSITION.y)
-	
-	targetPosition = nil
+	resetYou()
 end
 
 function start()
@@ -586,6 +590,7 @@ function endGame()
 	gameOver = true
 	whichEnd = math.random(NUMBER_OF_ENDS)
 	clearBoats()
+	resetYou()
 end
 
 function checkGrab()
