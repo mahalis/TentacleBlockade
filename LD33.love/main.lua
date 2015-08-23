@@ -44,10 +44,11 @@ BOAT_ACCELERATION = 0.4 -- multiplied by max speed
 GRAB_DISTANCE = 60
 GRAB_HOLD_DISTANCE = GRAB_DISTANCE * .2
 BOAT_RECOVER_SPEED = 40
-BOAT_IMPACT_THRESHOLD = 60
+BOAT_IMPACT_THRESHOLD = 120
+BOAT_HEAVY_IMPACT_THRESHOLD = 400
 BOAT_DAMAGE_INTERVAL = 1
 BOAT_MAXIMUM_HEALTH = 3
-BOAT_SINK_DURATION = 4
+BOAT_DISAPPEAR_DURATION = 4
 NUMBER_OF_LABELS = 6
 
 BOAT_SPAWN_INTERVAL_INITIAL = 6
@@ -65,12 +66,19 @@ local function contactBegan(fixture1, fixture2, contact)
 					-- it was indeed. fast enough collision to do damage?
 					local boatVelocityX, boatVelocityY = boat.body:getLinearVelocity()
 					local otherBoatVelocityX, otherBoatVelocityY = otherBoat.body:getLinearVelocity()
-					if vLen(vSub(v(boatVelocityX, boatVelocityY), v(otherBoatVelocityX, otherBoatVelocityY))) > BOAT_IMPACT_THRESHOLD then
-						damageBoat(boat)
-						damageBoat(otherBoat)
+					local impactSpeed = vLen(vSub(v(boatVelocityX, boatVelocityY), v(otherBoatVelocityX, otherBoatVelocityY)))
+					if impactSpeed > BOAT_IMPACT_THRESHOLD then
+						local damageAmount = 1
+						local bounceForce = 60
+						if impactSpeed > BOAT_HEAVY_IMPACT_THRESHOLD then
+							damageAmount = 2
+							bounceForce = 120
+						end
+						damageBoat(boat, damageAmount)
+						damageBoat(otherBoat, damageAmount)
 						local normalX, normalY = contact:getNormal()
-						boat.collisionImpartedVelocity = vMul(v(normalX, normalY), 100)
-						otherBoat.collisionImpartedVelocity = vMul(v(normalX, normalY), -100)
+						boat.collisionImpartedVelocity = vMul(v(normalX, normalY), bounceForce)
+						otherBoat.collisionImpartedVelocity = vMul(v(normalX, normalY), -bounceForce)
 					end
 				end
 			end
@@ -212,10 +220,11 @@ function love.draw()
 			local damageFactor = 1 - math.max(0,math.min(1,(elapsedTime - boat.lastDamageTime) / 0.5))
 			
 			local angle = math.sin(3 * elapsedTime + boat.rockPhase * math.pi) * .08 - .05
-			if boat.ended == true then
+			local sinking = (boat.ended == true and boat.health == 0)
+			if sinking then
 				angle = 0
 				
-				local sinkProgress = (elapsedTime - boat.endTime) / BOAT_SINK_DURATION
+				local sinkProgress = (elapsedTime - boat.endTime) / BOAT_DISAPPEAR_DURATION
 				local waveProgress = 0
 				if sinkProgress <= 1 then
 					waveProgress = math.min(1.0, sinkProgress * 4)
@@ -231,7 +240,7 @@ function love.draw()
 			end
 			love.graphics.setColor(40 + damageFactor * 200, 10, 0,255)
 			love.graphics.draw(boatImage, -boatImageWidth / 2, -boatImageHeight / 2, angle, 1) -- x, y, rotation, scale
-			if boat.ended then
+			if sinking then
 				love.graphics.setShader(nil)
 			end
 
@@ -248,8 +257,9 @@ function love.draw()
 	else
 		-- either title screen or end-game state
 		if not gameOver then
-			love.graphics.setColor(255, 255, 255, 255)
 			-- title screen
+			love.graphics.setColor(255, 255, 255, 255)
+
 			local titleImageWidth = titleImage:getDimensions()
 			local text1ImageWidth = text1Image:getDimensions()
 			local text2ImageWidth = text2Image:getDimensions()
@@ -314,40 +324,39 @@ function love.update(dt)
 			local boat = boats[i]
 			local boatPosition = v(boat.body:getX(), boat.body:getY())
 			local collisionImpartedVelocity = boat.collisionImpartedVelocity
-			if boat.health > 0 then
-				if boat.isGrabbed == false then
-					if boat.moveJoint ~= nil then
-						if collisionImpartedVelocity ~= nil then
-							-- if it just got hit, bounce it off
-							doCollision(boat)
-						else
-							-- move normally (TODO: add some variety to this, few octaves of noise?)
-							local speed = boat.speed
-							if speed < BOAT_SPEED then
-								speed = speed + (BOAT_SPEED * BOAT_ACCELERATION * dt)
-								boat.speed = speed
+			if not boat.ended then
+				if boat.health > 0 then
+					if boat.isGrabbed == false then
+						if boat.moveJoint ~= nil then
+							if collisionImpartedVelocity ~= nil then
+								-- if it just got hit, bounce it off
+								doCollision(boat)
+							else
+								-- move normally (TODO: add some variety to this, few octaves of noise?)
+								local speed = boat.speed
+								if speed < BOAT_SPEED then
+									speed = speed + (BOAT_SPEED * BOAT_ACCELERATION * dt)
+									boat.speed = speed
+								end
+								boat.moveJoint:setTarget(boatPosition.x + boat.speed * dt, boatPosition.y)
 							end
-							boat.moveJoint:setTarget(boatPosition.x + boat.speed * dt, boatPosition.y)
+						else
+							-- it’s not being moved — check whether it’s slowed down enough to start moving again
+							local boatVelocityX, boatVelocityY = boat.body:getLinearVelocity()
+							if vLen(v(boatVelocityX, boatVelocityY)) < BOAT_RECOVER_SPEED then
+								setBoatMoving(boat, true)
+							end
 						end
-					else
-						-- it’s not being moved — check whether it’s slowed down enough to start moving again
-						local boatVelocityX, boatVelocityY = boat.body:getLinearVelocity()
-						if vLen(v(boatVelocityX, boatVelocityY)) < BOAT_RECOVER_SPEED then
-							setBoatMoving(boat, true)
+					else -- boat is grabbed, but maybe it shouldn’t be — let’s check
+						if collisionImpartedVelocity ~= nil then
+							doCollision(boat)
 						end
 					end
-				else -- boat is grabbed, but maybe it shouldn’t be — let’s check
-					if collisionImpartedVelocity ~= nil then
-						doCollision(boat)
-					end
-				end
-			else
-				-- boat’s dead :(
-				if not boat.ended then
+				else -- health is 0 — boat is dead :(
 					endBoat(boat)
-				elseif elapsedTime > boat.endTime + 2 * BOAT_SINK_DURATION then
-					boatIndicesToRemove[#boatIndicesToRemove + 1] = i
 				end
+			elseif elapsedTime > boat.endTime + 2 * BOAT_DISAPPEAR_DURATION then -- boat is ended — do we need to remove it?
+				boatIndicesToRemove[#boatIndicesToRemove + 1] = i
 			end
 		end
 
@@ -417,9 +426,9 @@ function doCollision(boat)
 	end
 end
 
-function damageBoat(boat)
+function damageBoat(boat, damageAmount)
 	if elapsedTime > boat.lastDamageTime + BOAT_DAMAGE_INTERVAL then
-		boat.health = math.max(0, boat.health - 1)
+		boat.health = math.max(0, boat.health - damageAmount)
 		boat.lastDamageTime = elapsedTime
 		boat.speed = 0
 		-- we don’t remove the boat here because it ain’t safe — this is called from the physics callback. 
