@@ -16,6 +16,7 @@ local youNormalImage, youGrabbyImage
 local heartFullImage, heartEmptyImage
 local wavesImage
 local labelImages = {}
+local titleImage, text1Image, text2Image, startImage
 
 local playing = false
 local gameOver = false
@@ -33,16 +34,16 @@ SHORE_WIDTH = 220
 SIDE_CATEGORY = 3
 YOU_CATEGORY = 4
 BOAT_CATEGORY = 5
-STARTING_POSITION = v(0, 0) -- calculated below from window dimensions
+STARTING_POSITION = v(530, 280) -- calculated below from window dimensions
 YOU_SPEED = 600
 YOU_MINIMUM_SPEED = 200
 YOU_GRABBING_SPEED_MULTIPLIER = 0.7
 YOU_RADIUS = 18
-BOAT_SPEED = 160
+BOAT_SPEED = 320
 BOAT_ACCELERATION = 0.4 -- multiplied by max speed
 GRAB_DISTANCE = 60
 GRAB_HOLD_DISTANCE = GRAB_DISTANCE * .2
-BOAT_RECOVER_SPEED = 10
+BOAT_RECOVER_SPEED = 40
 BOAT_IMPACT_THRESHOLD = 60
 BOAT_DAMAGE_INTERVAL = 1
 BOAT_MAXIMUM_HEALTH = 3
@@ -92,6 +93,10 @@ function love.load()
 	for i = 1, NUMBER_OF_LABELS do
 		labelImages[#labelImages + 1] = love.graphics.newImage("graphics/labels/label " .. tostring(i) .. ".png")
 	end
+	titleImage = love.graphics.newImage("graphics/title.png")
+	text1Image = love.graphics.newImage("graphics/text 1.png")
+	text2Image = love.graphics.newImage("graphics/text 2.png")
+	startImage = love.graphics.newImage("graphics/text 3.png")
 
 	backgroundMusic = love.audio.newSource("sounds/background.mp3")
 	backgroundMusic:setLooping(true)
@@ -100,8 +105,6 @@ function love.load()
 	-- physics
 
 	local w, h = love.window.getDimensions()
-
-	STARTING_POSITION = v(w / 2, h * 0.8)
 
 	world = love.physics.newWorld()
 	world:setCallbacks(contactBegan, nil, nil, nil)
@@ -157,25 +160,25 @@ function love.draw()
 	love.graphics.setColor(255, 255, 255, 255)
 	local w, h = love.window.getDimensions()
 
+	love.graphics.draw(backgroundImage, 0, 0)
+	
+	if isGrabbing then
+		love.graphics.setColor(40, 10, 0, 255)
+	else
+		love.graphics.setColor(150, 101, 7, 255)
+	end
+
+	-- player
+	local youImage = (isGrabbing and youGrabbyImage or youNormalImage)
+	local youImageWidth, youImageHeight = youImage:getDimensions()
+	love.graphics.push()
+	love.graphics.translate(you.body:getX(), you.body:getY())
+	love.graphics.setShader(youShader)
+	love.graphics.draw(youImage, -youImageWidth / 2, -youImageHeight / 2, 0, 1)
+	love.graphics.setShader(nil)
+	love.graphics.pop()
+
 	if playing then
-		love.graphics.draw(backgroundImage, 0, 0)
-
-		if isGrabbing then
-			love.graphics.setColor(40, 10, 0, 255)
-		else
-			love.graphics.setColor(150, 101, 7, 255)
-		end
-
-		-- player
-		local youImage = (isGrabbing and youGrabbyImage or youNormalImage)
-		local youImageWidth, youImageHeight = youImage:getDimensions()
-		love.graphics.push()
-		love.graphics.translate(you.body:getX(), you.body:getY())
-		love.graphics.setShader(youShader)
-		love.graphics.draw(youImage, -youImageWidth / 2, -youImageHeight / 2, 0, 1)
-		love.graphics.setShader(nil)
-		love.graphics.pop()
-
 		local boatImageWidth, boatImageHeight = boatImage:getDimensions()
 		local heartImageWidth, heartImageHeight = heartFullImage:getDimensions()
 		local heartPadding = 3
@@ -245,7 +248,18 @@ function love.draw()
 	else
 		-- either title screen or end-game state
 		if not gameOver then
+			love.graphics.setColor(255, 255, 255, 255)
 			-- title screen
+			local titleImageWidth = titleImage:getDimensions()
+			local text1ImageWidth = text1Image:getDimensions()
+			local text2ImageWidth = text2Image:getDimensions()
+			local startImageWidth = startImage:getDimensions()
+
+			local textRightMargin = 714
+			love.graphics.draw(titleImage, textRightMargin - titleImageWidth, 71)
+			love.graphics.draw(text1Image, textRightMargin - text1ImageWidth, 304)
+			love.graphics.draw(text2Image, textRightMargin - text2ImageWidth, 352)
+			love.graphics.draw(startImage, textRightMargin - startImageWidth, 410)
 		else
 			-- end-game
 		end
@@ -344,12 +358,11 @@ function love.update(dt)
 			numberOfAlreadyRemovedBoats = numberOfAlreadyRemovedBoats + 1
 		end
 
-
-		youShader:send("time", elapsedTime)
-		youShader:send("grabbing", (isGrabbing and 1 or 0))
-
 		world:update(dt)
 	end
+
+	youShader:send("time", elapsedTime)
+	youShader:send("grabbing", (isGrabbing and 1 or 0))
 end
 
 function makeBoat(x, y)
@@ -426,7 +439,6 @@ function reset()
 	playing = false
 	gameOver = false
 	elapsedTime = 0
-	lastBoatTime = -BOAT_SPAWN_INTERVAL_INITIAL
 	
 	youJoint:setTarget(STARTING_POSITION.x, STARTING_POSITION.y)
 	you.body:setX(STARTING_POSITION.x)
@@ -437,6 +449,7 @@ end
 
 function start()
 	playing = true
+	lastBoatTime = elapsedTime
 end
 
 function checkGrab()
