@@ -8,10 +8,6 @@ local boats = {}
 local elapsedTime = 0
 local lastBoatTime = 0
 
-local score = 0
-local lastScore = 0
-local scoreChangedTime = -1
-
 local targetPosition = nil
 
 local backgroundImage
@@ -29,6 +25,8 @@ local grabbedBoats = {}
 
 local youShader
 local boatShader -- used to mess with the texture coordinates when sinking
+
+local backgroundMusic
 
 WALL_THICKNESS = 40
 SHORE_WIDTH = 220
@@ -95,8 +93,9 @@ function love.load()
 		labelImages[#labelImages + 1] = love.graphics.newImage("graphics/labels/label " .. tostring(i) .. ".png")
 	end
 
-	scoreBigFont = love.graphics.newFont(30)
-	scoreLittleFont = love.graphics.newFont(20)
+	backgroundMusic = love.audio.newSource("sounds/background.mp3")
+	backgroundMusic:setLooping(true)
+	backgroundMusic:play()
 
 	-- physics
 
@@ -424,8 +423,6 @@ function clearBoats()
 end
 
 function reset()
-	score = 0
-
 	playing = false
 	gameOver = false
 	elapsedTime = 0
