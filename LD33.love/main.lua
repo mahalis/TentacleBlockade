@@ -186,8 +186,13 @@ function love.draw()
 			local healthStartX = -((heartImageWidth * BOAT_MAXIMUM_HEALTH) + (heartPadding * (BOAT_MAXIMUM_HEALTH - 1))) / 2 - 4
 			for i = 1, BOAT_MAXIMUM_HEALTH do
 				local heartY = -36
+				heartFraction = (i - 1) / BOAT_MAXIMUM_HEALTH
 				if i <= health then
-					heartY = heartY - math.pow(math.abs(math.sin(5 * elapsedTime + (boat.rockPhase + (i / BOAT_MAXIMUM_HEALTH)) * math.pi)), .6) * 4
+					heartY = heartY - math.pow(math.abs(math.sin(5 * elapsedTime + (boat.rockPhase + heartFraction) * math.pi)), .6) * 4
+				elseif boat.ended then
+					heartFallAmount = math.min(1, math.max(0, (elapsedTime - boat.endTime) / 0.9 - heartFraction * 0.2))
+					love.graphics.setColor(40, 10, 0, 255 * (1.0 - math.pow(heartFallAmount, 6)))
+					heartY = heartY + (2.4 * heartFallAmount * (heartFallAmount - 0.6)) * 60
 				end
 				love.graphics.draw(i > health and heartEmptyImage or heartFullImage, healthStartX + (heartImageWidth + heartPadding) * (i - 1), heartY)
 			end
@@ -217,7 +222,6 @@ function love.draw()
 			love.graphics.draw(boatImage, -boatImageWidth / 2, -boatImageHeight / 2, angle, 1) -- x, y, rotation, scale
 			if boat.ended then
 				love.graphics.setShader(nil)
-				
 			end
 
 			love.graphics.pop()
@@ -278,6 +282,7 @@ function love.update(dt)
 		checkGrab()
 
 		-- boat movement etc.
+		local boatIndicesToRemove = {}
 		for i = 1, #boats do
 			local boat = boats[i]
 			local boatPosition = v(boat.body:getX(), boat.body:getY())
@@ -314,9 +319,16 @@ function love.update(dt)
 				if not boat.ended then
 					endBoat(boat)
 				elseif elapsedTime > boat.endTime + 2 * BOAT_SINK_DURATION then
-					-- remove it from the world
+					boatIndicesToRemove[#boatIndicesToRemove + 1] = i
 				end
 			end
+		end
+
+		local numberOfAlreadyRemovedBoats = 0
+		for i = 1, #boatIndicesToRemove do
+			local boat = boats[boatIndicesToRemove[i]]
+			table.remove(boats, boatIndicesToRemove[i] - numberOfAlreadyRemovedBoats)
+			numberOfAlreadyRemovedBoats = numberOfAlreadyRemovedBoats + 1
 		end
 
 
