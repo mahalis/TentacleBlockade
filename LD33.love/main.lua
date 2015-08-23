@@ -37,7 +37,7 @@ BOAT_CATEGORY = 5
 STARTING_POSITION = v(0, 0) -- calculated below from window dimensions
 YOU_SPEED = 600
 YOU_MINIMUM_SPEED = 200
-YOU_GRABBING_SPEED_MULTIPLIER = 0.5
+YOU_GRABBING_SPEED_MULTIPLIER = 0.7
 YOU_RADIUS = 18
 BOAT_SPEED = 160
 BOAT_ACCELERATION = 0.4 -- multiplied by max speed
@@ -157,7 +157,7 @@ function love.draw()
 	if playing then
 		love.graphics.draw(backgroundImage, 0, 0)
 
-		love.graphics.setColor(40, 10, 0, 255)
+		love.graphics.setColor(40, 10, 0, isGrabbing and 255 or 180)
 
 		-- player
 		local youImage = (isGrabbing and youGrabbyImage or youNormalImage)
@@ -251,9 +251,6 @@ function love.update(dt)
 
 		targetPosition = v(love.mouse.getX(), love.mouse.getY())
 
-		targetPosition.x = math.max(math.min(targetPosition.x, screenWidth - SHORE_WIDTH - YOU_RADIUS), WALL_THICKNESS + YOU_RADIUS)
-		targetPosition.y = math.max(math.min(targetPosition.y, screenHeight - WALL_THICKNESS - YOU_RADIUS), WALL_THICKNESS + YOU_RADIUS)
-
 		local towards = vMul(vSub(targetPosition, currentPosition), 2)
 		local towardsLength = vLen(towards)
 		local maxSpeed = YOU_SPEED
@@ -268,6 +265,8 @@ function love.update(dt)
 			towards = vMul(towards, minSpeed / towardsLength)
 		end
 		newPosition = vAdd(currentPosition, vMul(towards, dt))
+		newPosition.x = math.max(math.min(newPosition.x, screenWidth - SHORE_WIDTH - YOU_RADIUS), WALL_THICKNESS + YOU_RADIUS)
+		newPosition.y = math.max(math.min(newPosition.y, screenHeight - WALL_THICKNESS - YOU_RADIUS), WALL_THICKNESS + YOU_RADIUS)
 
 		youJoint:setTarget(newPosition.x, newPosition.y)
 
