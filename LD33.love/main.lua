@@ -18,6 +18,7 @@ local backgroundImage
 local boatImage
 local youNormalImage, youGrabbyImage
 local heartFullImage, heartEmptyImage
+local wavesImage
 
 local playing = false
 local gameOver = false
@@ -26,6 +27,7 @@ local isGrabbing = false
 local grabbedBoats = {}
 
 local youShader
+local boatShader -- used to mess with the texture coordinates when sinking
 
 WALL_THICKNESS = 40
 SHORE_WIDTH = 220
@@ -45,6 +47,7 @@ BOAT_RECOVER_SPEED = 10
 BOAT_IMPACT_THRESHOLD = 60
 BOAT_DAMAGE_INTERVAL = 1
 BOAT_MAXIMUM_HEALTH = 3
+BOAT_SINK_DURATION = 4
 
 BOAT_SPAWN_INTERVAL_INITIAL = 6
 BOAT_SPAWN_INTERVAL_DELTA = -0.02 -- per second
@@ -85,6 +88,7 @@ function love.load()
 	youGrabbyImage = love.graphics.newImage("graphics/you grabby.png")
 	heartEmptyImage = love.graphics.newImage("graphics/heart empty.png")
 	heartFullImage = love.graphics.newImage("graphics/heart full.png")
+	wavesImage = love.graphics.newImage("graphics/waves.png")
 	-- fonts
 
 	scoreBigFont = love.graphics.newFont(30)
@@ -135,6 +139,7 @@ function love.load()
 	youJoint = love.physics.newMouseJoint(you.body, 0, 0)
 
 	youShader = love.graphics.newShader("you.fsh")
+	boatShader = love.graphics.newShader("boat.fsh")
 
 	-- get gameplay stuff ready
 
@@ -167,6 +172,7 @@ function love.draw()
 		local boatImageWidth, boatImageHeight = boatImage:getDimensions()
 		local heartImageWidth, heartImageHeight = heartFullImage:getDimensions()
 		local heartPadding = 3
+		local wavesImageWidth, wavesImageHeight = wavesImage:getDimensions()
 
 		-- boats
 		for i = 1, #boats do
@@ -189,8 +195,30 @@ function love.draw()
 			-- TODO: labels (pre-rotation)
 			local damageFactor = 1 - math.max(0,math.min(1,(elapsedTime - boat.lastDamageTime) / 0.5))
 
+			
+			local angle = math.sin(3 * elapsedTime + boat.rockPhase * math.pi) * .08 - .05
+			if boat.ended == true then
+				angle = 0
+				
+				local sinkProgress = (elapsedTime - boat.endTime) / BOAT_SINK_DURATION
+				local waveProgress = 0
+				if sinkProgress <= 1 then
+					waveProgress = math.min(1.0, sinkProgress * 4)
+				else
+					waveProgress = math.max(0.0, 1.0 - (sinkProgress - 1) * 4)
+				end
+				love.graphics.setColor(100, 53, 0, waveProgress * 255)
+				love.graphics.draw(wavesImage, 0, boatImageHeight / 2 + 6, 0, 1, 0.3 + waveProgress * 0.7 * (.7 + .3 * math.abs(math.sin(elapsedTime * 5 + boat.rockPhase * math.pi))), wavesImageWidth / 2, wavesImageHeight)
+
+				love.graphics.setShader(boatShader)
+				boatShader:send("progress", sinkProgress)
+			end
 			love.graphics.setColor(40 + damageFactor * 200, 10, 0,255)
-			love.graphics.draw(boatImage, -boatImageWidth / 2, -boatImageHeight / 2, math.sin(3 * elapsedTime + boat.rockPhase * math.pi) * .08 - .05, 1) -- x, y, rotation, scale
+			love.graphics.draw(boatImage, -boatImageWidth / 2, -boatImageHeight / 2, angle, 1) -- x, y, rotation, scale
+			if boat.ended then
+				love.graphics.setShader(nil)
+				
+			end
 
 			love.graphics.pop()
 		end
@@ -249,38 +277,48 @@ function love.update(dt)
 		-- grabbing
 		checkGrab()
 
-		-- boat movement
+		-- boat movement etc.
 		for i = 1, #boats do
 			local boat = boats[i]
 			local boatPosition = v(boat.body:getX(), boat.body:getY())
 			local collisionImpartedVelocity = boat.collisionImpartedVelocity
-			if boat.isGrabbed == false then
-				if boat.moveJoint ~= nil then
-					if collisionImpartedVelocity ~= nil then
-						-- if it just got hit, bounce it off
-						doCollision(boat)
-					else
-						-- move normally (TODO: add some variety to this, few octaves of noise?)
-						local speed = boat.speed
-						if speed < BOAT_SPEED then
-							speed = speed + (BOAT_SPEED * BOAT_ACCELERATION * dt)
-							boat.speed = speed
+			if boat.health > 0 then
+				if boat.isGrabbed == false then
+					if boat.moveJoint ~= nil then
+						if collisionImpartedVelocity ~= nil then
+							-- if it just got hit, bounce it off
+							doCollision(boat)
+						else
+							-- move normally (TODO: add some variety to this, few octaves of noise?)
+							local speed = boat.speed
+							if speed < BOAT_SPEED then
+								speed = speed + (BOAT_SPEED * BOAT_ACCELERATION * dt)
+								boat.speed = speed
+							end
+							boat.moveJoint:setTarget(boatPosition.x + boat.speed * dt, boatPosition.y)
 						end
-						boat.moveJoint:setTarget(boatPosition.x + boat.speed * dt, boatPosition.y)
+					else
+						-- it’s not being moved — check whether it’s slowed down enough to start moving again
+						local boatVelocityX, boatVelocityY = boat.body:getLinearVelocity()
+						if vLen(v(boatVelocityX, boatVelocityY)) < BOAT_RECOVER_SPEED then
+							setBoatMoving(boat, true)
+						end
 					end
-				else
-					-- it’s not being moved — check whether it’s slowed down enough to start moving again
-					local boatVelocityX, boatVelocityY = boat.body:getLinearVelocity()
-					if vLen(v(boatVelocityX, boatVelocityY)) < BOAT_RECOVER_SPEED then
-						setBoatMoving(boat, true)
+				else -- boat is grabbed, but maybe it shouldn’t be — let’s check
+					if collisionImpartedVelocity ~= nil then
+						doCollision(boat)
 					end
 				end
-			else -- boat is grabbed, but maybe it shouldn’t be — let’s check
-				if collisionImpartedVelocity ~= nil then
-					doCollision(boat)
+			else
+				-- boat’s dead :(
+				if not boat.ended then
+					endBoat(boat)
+				elseif elapsedTime > boat.endTime + 2 * BOAT_SINK_DURATION then
+					-- remove it from the world
 				end
 			end
 		end
+
 
 		youShader:send("time", elapsedTime)
 		youShader:send("grabbing", (isGrabbing and 1 or 0))
@@ -295,24 +333,40 @@ function makeBoat(x, y)
 	boat.body = love.physics.newBody(world, x, y, "dynamic")
 	boat.body:setLinearDamping(0.6)
 	boat.fixture = love.physics.newFixture(boat.body, boat.shape)
-	boat.fixture:setMask(BOAT_CATEGORY, SIDE_CATEGORY, YOU_CATEGORY)
+	boat.fixture:setCategory(BOAT_CATEGORY)
+	boat.fixture:setMask(SIDE_CATEGORY, YOU_CATEGORY)
 	boat.speed = 0
 	boat.health = BOAT_MAXIMUM_HEALTH
 	boat.lastDamageTime = -60
 	boat.isGrabbed = false
 	boat.rockPhase = math.random()
+	boat.ended = false
 	setBoatMoving(boat, true)
 	return boat
 end
 
 function setBoatMoving(boat, moving)
-	if boat.moveJoint == nil and moving then
-		boat.speed = 0
-		boat.moveJoint = love.physics.newMouseJoint(boat.body, boat.body:getX(), boat.body:getY())
-	elseif boat.moveJoint ~= nil and not moving then
-		boat.moveJoint:destroy()
-		boat.moveJoint = nil
+	if not boat.ended then
+		if boat.moveJoint == nil and moving then
+			boat.speed = 0
+			boat.moveJoint = love.physics.newMouseJoint(boat.body, boat.body:getX(), boat.body:getY())
+		elseif boat.moveJoint ~= nil and not moving then
+			boat.moveJoint:destroy()
+			boat.moveJoint = nil
+		end
 	end
+end
+
+function endBoat(boat)
+	setBoatMoving(boat, false)
+	if boat.isGrabbed then
+		endGrabbing()
+	end
+	boat.fixture:setMask(BOAT_CATEGORY, SIDE_CATEGORY, YOU_CATEGORY)
+	boat.ended = true
+	boat.endTime = elapsedTime
+	boat.collisionImpartedVelocity = nil
+	boat.body:setLinearVelocity(0, 0)
 end
 
 function doCollision(boat)
@@ -365,16 +419,18 @@ function checkGrab()
 	if isGrabbing and #grabbedBoats == 0 then
 		for i = 1, #boats do
 			local boat = boats[i]
-			local boatPosition = v(boat.body:getX(), boat.body:getY())
-			local youPosition = v(you.body:getX(), you.body:getY())
-			local boatDistance = vDist(boatPosition, youPosition)
-			if boatDistance < GRAB_DISTANCE then
-				setBoatMoving(boat, false)
-				local grabPosition = vMix(youPosition, boatPosition, GRAB_HOLD_DISTANCE / boatDistance)
-				local grabJoint = love.physics.newDistanceJoint(you.body, boat.body, grabPosition.x, grabPosition.y, boatPosition.x, boatPosition.y)
-				boat.grabJoint = grabJoint
-				boat.isGrabbed = true
-				grabbedBoats[#grabbedBoats + 1] = boat
+			if boat.ended == false then
+				local boatPosition = v(boat.body:getX(), boat.body:getY())
+				local youPosition = v(you.body:getX(), you.body:getY())
+				local boatDistance = vDist(boatPosition, youPosition)
+				if boatDistance < GRAB_DISTANCE then
+					setBoatMoving(boat, false)
+					local grabPosition = vMix(youPosition, boatPosition, GRAB_HOLD_DISTANCE / boatDistance)
+					local grabJoint = love.physics.newDistanceJoint(you.body, boat.body, grabPosition.x, grabPosition.y, boatPosition.x, boatPosition.y)
+					boat.grabJoint = grabJoint
+					boat.isGrabbed = true
+					grabbedBoats[#grabbedBoats + 1] = boat
+				end
 			end
 		end
 	end
