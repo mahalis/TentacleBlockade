@@ -19,6 +19,7 @@ local boatImage
 local youNormalImage, youGrabbyImage
 local heartFullImage, heartEmptyImage
 local wavesImage
+local labelImages = {}
 
 local playing = false
 local gameOver = false
@@ -48,9 +49,10 @@ BOAT_IMPACT_THRESHOLD = 60
 BOAT_DAMAGE_INTERVAL = 1
 BOAT_MAXIMUM_HEALTH = 3
 BOAT_SINK_DURATION = 4
+NUMBER_OF_LABELS = 6
 
 BOAT_SPAWN_INTERVAL_INITIAL = 6
-BOAT_SPAWN_INTERVAL_DELTA = -0.02 -- per second
+BOAT_SPAWN_INTERVAL_DELTA = -0.05 -- per second
 BOAT_SPAWN_INTERVAL_MINIMUM = 1
 
 local function contactBegan(fixture1, fixture2, contact)
@@ -61,7 +63,7 @@ local function contactBegan(fixture1, fixture2, contact)
 			for j = 1, #boats do
 				local otherBoat = boats[j]
 				if either(otherBoat.fixture, fixture1, fixture2) then
-					-- yes! TODO: damage based on speed
+					-- it was indeed. fast enough collision to do damage?
 					local boatVelocityX, boatVelocityY = boat.body:getLinearVelocity()
 					local otherBoatVelocityX, otherBoatVelocityY = otherBoat.body:getLinearVelocity()
 					if vLen(vSub(v(boatVelocityX, boatVelocityY), v(otherBoatVelocityX, otherBoatVelocityY))) > BOAT_IMPACT_THRESHOLD then
@@ -89,7 +91,9 @@ function love.load()
 	heartEmptyImage = love.graphics.newImage("graphics/heart empty.png")
 	heartFullImage = love.graphics.newImage("graphics/heart full.png")
 	wavesImage = love.graphics.newImage("graphics/waves.png")
-	-- fonts
+	for i = 1, NUMBER_OF_LABELS do
+		labelImages[#labelImages + 1] = love.graphics.newImage("graphics/labels/label " .. tostring(i) .. ".png")
+	end
 
 	scoreBigFont = love.graphics.newFont(30)
 	scoreLittleFont = love.graphics.newFont(20)
@@ -157,7 +161,11 @@ function love.draw()
 	if playing then
 		love.graphics.draw(backgroundImage, 0, 0)
 
-		love.graphics.setColor(40, 10, 0, isGrabbing and 255 or 180)
+		if isGrabbing then
+			love.graphics.setColor(40, 10, 0, 255)
+		else
+			love.graphics.setColor(150, 101, 7, 255)
+		end
 
 		-- player
 		local youImage = (isGrabbing and youGrabbyImage or youNormalImage)
@@ -197,9 +205,9 @@ function love.draw()
 				love.graphics.draw(i > health and heartEmptyImage or heartFullImage, healthStartX + (heartImageWidth + heartPadding) * (i - 1), heartY)
 			end
 			
-			-- TODO: labels (pre-rotation)
-			local damageFactor = 1 - math.max(0,math.min(1,(elapsedTime - boat.lastDamageTime) / 0.5))
+			local labelVisibility = 1 -- modified below if the label needs to be fading out
 
+			local damageFactor = 1 - math.max(0,math.min(1,(elapsedTime - boat.lastDamageTime) / 0.5))
 			
 			local angle = math.sin(3 * elapsedTime + boat.rockPhase * math.pi) * .08 - .05
 			if boat.ended == true then
@@ -211,6 +219,7 @@ function love.draw()
 					waveProgress = math.min(1.0, sinkProgress * 4)
 				else
 					waveProgress = math.max(0.0, 1.0 - (sinkProgress - 1) * 4)
+					labelVisibility = waveProgress
 				end
 				love.graphics.setColor(100, 53, 0, waveProgress * 255)
 				love.graphics.draw(wavesImage, 0, boatImageHeight / 2 + 6, 0, 1, 0.3 + waveProgress * 0.7 * (.7 + .3 * math.abs(math.sin(elapsedTime * 5 + boat.rockPhase * math.pi))), wavesImageWidth / 2, wavesImageHeight)
@@ -223,6 +232,12 @@ function love.draw()
 			if boat.ended then
 				love.graphics.setShader(nil)
 			end
+
+			local labelImage = labelImages[boat.labelIndex]
+			local labelWidth, labelHeight = labelImage:getDimensions()
+			
+			love.graphics.setColor(100, 40, 0, 180 * labelVisibility)
+			love.graphics.draw(labelImage, -labelWidth / 2, 30)
 
 			love.graphics.pop()
 		end
@@ -273,7 +288,7 @@ function love.update(dt)
 		-- boat spawns
 		local boatSpawnInterval = math.max(BOAT_SPAWN_INTERVAL_MINIMUM, BOAT_SPAWN_INTERVAL_INITIAL - BOAT_SPAWN_INTERVAL_DELTA * elapsedTime)
 		if elapsedTime > lastBoatTime + boatSpawnInterval then
-			boats[#boats + 1] = makeBoat(-WALL_THICKNESS, 2 * WALL_THICKNESS + math.random() * (screenHeight - 4 * WALL_THICKNESS))
+			boats[#boats + 1] = makeBoat(-WALL_THICKNESS * 2, 2 * WALL_THICKNESS + math.random() * (screenHeight - 4 * WALL_THICKNESS))
 			lastBoatTime = elapsedTime
 		end
 
@@ -351,6 +366,7 @@ function makeBoat(x, y)
 	boat.lastDamageTime = -60
 	boat.isGrabbed = false
 	boat.rockPhase = math.random()
+	boat.labelIndex = math.random(NUMBER_OF_LABELS)
 	boat.ended = false
 	setBoatMoving(boat, true)
 	return boat
