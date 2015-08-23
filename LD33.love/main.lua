@@ -16,6 +16,7 @@ local targetPosition = nil
 
 local backgroundImage
 local boatImage
+local youNormalImage, youGrabbyImage
 
 local playing = false
 local gameOver = false
@@ -29,14 +30,14 @@ SIDE_CATEGORY = 3
 YOU_CATEGORY = 4
 BOAT_CATEGORY = 5
 STARTING_POSITION = v(0, 0) -- calculated below from window dimensions
-YOU_SPEED = 400
-YOU_MINIMUM_SPEED = 120
+YOU_SPEED = 600
+YOU_MINIMUM_SPEED = 200
 YOU_GRABBING_SPEED_MULTIPLIER = 0.5
 YOU_RADIUS = 18
 BOAT_SPEED = 160
 BOAT_ACCELERATION = 0.4 -- multiplied by max speed
-GRAB_DISTANCE = 40
-GRAB_HOLD_DISTANCE = GRAB_DISTANCE * .3
+GRAB_DISTANCE = 60
+GRAB_HOLD_DISTANCE = GRAB_DISTANCE * .7
 BOAT_RECOVER_SPEED = 10
 BOAT_IMPACT_THRESHOLD = 60
 BOAT_DAMAGE_INTERVAL = 1
@@ -77,7 +78,8 @@ function love.load()
 
 	backgroundImage = love.graphics.newImage("graphics/background.png")
 	boatImage = love.graphics.newImage("graphics/boat.png")
-
+	youNormalImage = love.graphics.newImage("graphics/you normal.png")
+	youGrabbyImage = love.graphics.newImage("graphics/you grabby.png")
 	-- fonts
 
 	scoreBigFont = love.graphics.newFont(30)
@@ -144,8 +146,14 @@ function love.draw()
 		love.graphics.draw(backgroundImage, 0, 0)
 
 		love.graphics.setColor(40, 10, 0, 255)
+
 		-- player
-		love.graphics.circle("fill", you.body:getX(), you.body:getY(), (isGrabbing and YOU_RADIUS or YOU_RADIUS * 0.5), 40)
+		local youImage = (isGrabbing and youGrabbyImage or youNormalImage)
+		local youImageWidth, youImageHeight = youImage:getDimensions()
+		love.graphics.push()
+		love.graphics.translate(you.body:getX(), you.body:getY())
+		love.graphics.draw(youImage, -youImageWidth / 2, -youImageHeight / 2, 0, 1)
+		love.graphics.pop()
 
 		local boatImageWidth, boatImageHeight = boatImage:getDimensions()
 		-- boats
@@ -189,29 +197,27 @@ function love.update(dt)
 		local currentPositionX, currentPositionY = youJoint:getTarget()
 		local currentPosition = v(currentPositionX, currentPositionY)
 		local newPosition = currentPosition
-		if love.mouse.isDown("l") and targetPosition ~= nil then
-			targetPosition = v(love.mouse.getX(), love.mouse.getY())
 
-			targetPosition.x = math.max(math.min(targetPosition.x, screenWidth - SHORE_WIDTH - YOU_RADIUS), WALL_THICKNESS + YOU_RADIUS)
-			targetPosition.y = math.max(math.min(targetPosition.y, screenHeight - WALL_THICKNESS - YOU_RADIUS), WALL_THICKNESS + YOU_RADIUS)
+		targetPosition = v(love.mouse.getX(), love.mouse.getY())
 
-			local towards = vMul(vSub(targetPosition, currentPosition), 2)
-			local towardsLength = vLen(towards)
-			local maxSpeed = YOU_SPEED
-			local minSpeed = YOU_MINIMUM_SPEED
-			if isGrabbing then
-				maxSpeed = maxSpeed * YOU_GRABBING_SPEED_MULTIPLIER
-				minSpeed = minSpeed * YOU_GRABBING_SPEED_MULTIPLIER
-			end
-			if towardsLength > maxSpeed then
-				towards = vMul(towards, maxSpeed / towardsLength)
-			elseif towardsLength < minSpeed then
-				towards = vMul(towards, minSpeed / towardsLength)
-			end
-			newPosition = vAdd(currentPosition, vMul(towards, dt))
-		else
-			-- TODO: deceleration, using delta between current position and last-frame position as starting velocity
+		targetPosition.x = math.max(math.min(targetPosition.x, screenWidth - SHORE_WIDTH - YOU_RADIUS), WALL_THICKNESS + YOU_RADIUS)
+		targetPosition.y = math.max(math.min(targetPosition.y, screenHeight - WALL_THICKNESS - YOU_RADIUS), WALL_THICKNESS + YOU_RADIUS)
+
+		local towards = vMul(vSub(targetPosition, currentPosition), 2)
+		local towardsLength = vLen(towards)
+		local maxSpeed = YOU_SPEED
+		local minSpeed = YOU_MINIMUM_SPEED
+		if isGrabbing then
+			maxSpeed = maxSpeed * YOU_GRABBING_SPEED_MULTIPLIER
+			minSpeed = minSpeed * YOU_GRABBING_SPEED_MULTIPLIER
 		end
+		if towardsLength > maxSpeed then
+			towards = vMul(towards, maxSpeed / towardsLength)
+		elseif towardsLength < minSpeed then
+			towards = vMul(towards, minSpeed / towardsLength)
+		end
+		newPosition = vAdd(currentPosition, vMul(towards, dt))
+
 		youJoint:setTarget(newPosition.x, newPosition.y)
 
 		-- boat spawns
@@ -332,14 +338,6 @@ function start()
 	playing = true
 end
 
-function love.keypressed(key, isRepeat)
-	if not isGrabbing then
-		isGrabbing = true
-		grabbedBoats = {}
-		checkGrab()
-	end
-end
-
 function checkGrab()
 	if isGrabbing and #grabbedBoats == 0 then
 		for i = 1, #boats do
@@ -357,10 +355,6 @@ function checkGrab()
 			end
 		end
 	end
-end
-
-function love.keyreleased(key, isRepeat)
-	endGrabbing()
 end
 
 function endGrabbing()
@@ -384,14 +378,17 @@ function love.mousepressed(x, y, button)
 			start()
 		end
 	else
-		-- movement is handled in update
+		if not isGrabbing then
+			isGrabbing = true
+			grabbedBoats = {}
+			checkGrab()
+		end
 	end
 end
 
 function love.mousereleased(x, y, button)
-	if playing and targetPosition == nil then
-		-- update uses this as a signal for whether it should actually set a position while the mouse is down
-		targetPosition = STARTING_POSITION
+	if playing then
+		endGrabbing()
 	end
 end
 
