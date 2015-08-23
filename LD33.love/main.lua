@@ -17,9 +17,17 @@ local heartFullImage, heartEmptyImage
 local wavesImage
 local labelImages = {}
 local titleImage, text1Image, text2Image, startImage
+local desperationTextImage
+local endTitleImage
+local endImages = {}
+local tryAgainImage
 
 local playing = false
 local gameOver = false
+local whichEnd = 1
+
+local desperationLevel
+local lastLandingTime = 0
 
 local isGrabbing = false
 local grabbedBoats = {}
@@ -40,20 +48,24 @@ YOU_MINIMUM_SPEED = 200
 YOU_GRABBING_SPEED_MULTIPLIER = 0.7
 YOU_RADIUS = 18
 BOAT_SPEED = 320
-BOAT_ACCELERATION = 0.4 -- multiplied by max speed
+BOAT_ACCELERATION = 0.6 -- multiplied by max speed
 GRAB_DISTANCE = 60
 GRAB_HOLD_DISTANCE = GRAB_DISTANCE * .2
-BOAT_RECOVER_SPEED = 40
+BOAT_RECOVER_SPEED = 60
 BOAT_IMPACT_THRESHOLD = 120
 BOAT_HEAVY_IMPACT_THRESHOLD = 400
 BOAT_DAMAGE_INTERVAL = 1
 BOAT_MAXIMUM_HEALTH = 3
 BOAT_DISAPPEAR_DURATION = 4
 NUMBER_OF_LABELS = 6
+MAX_DESPERATION = 5
+DESPERATION_REGEN_SPEED = 0 -- per second
+SCREEN_SHAKE_DURATION = 0.1
+NUMBER_OF_ENDS = 4
 
-BOAT_SPAWN_INTERVAL_INITIAL = 6
-BOAT_SPAWN_INTERVAL_DELTA = -0.05 -- per second
-BOAT_SPAWN_INTERVAL_MINIMUM = 1
+BOAT_SPAWN_INTERVAL_INITIAL = 1.2
+BOAT_SPAWN_INTERVAL_DELTA = -0.08 -- per second
+BOAT_SPAWN_INTERVAL_MINIMUM = 0.5
 
 local function contactBegan(fixture1, fixture2, contact)
 	for i = 1, #boats do
@@ -105,10 +117,16 @@ function love.load()
 	text1Image = love.graphics.newImage("graphics/text 1.png")
 	text2Image = love.graphics.newImage("graphics/text 2.png")
 	startImage = love.graphics.newImage("graphics/text 3.png")
+	desperationTextImage = love.graphics.newImage("graphics/desperation text.png")
+	endTitleImage = love.graphics.newImage("graphics/game over.png")
+	for i = 1, NUMBER_OF_ENDS do
+		endImages[#endImages + 1] = love.graphics.newImage("graphics/ends/end " .. tostring(i) .. ".png")
+	end
+	tryAgainImage = love.graphics.newImage("graphics/try again.png")
 
 	backgroundMusic = love.audio.newSource("sounds/background.mp3")
 	backgroundMusic:setLooping(true)
-	backgroundMusic:play()
+	-- backgroundMusic:play()
 
 	-- physics
 
@@ -168,6 +186,14 @@ function love.draw()
 	love.graphics.setColor(255, 255, 255, 255)
 	local w, h = love.window.getDimensions()
 
+	local shakeAmount = math.min(1, math.max(0, (elapsedTime - lastLandingTime) / SCREEN_SHAKE_DURATION))
+	if shakeAmount > 0 and shakeAmount < 1 then
+		local amplitude = .02
+		local scale = 1 + (math.sin(shakeAmount * 12) * .5 + .5) * amplitude * (1 - shakeAmount)
+		love.graphics.translate(w * (1 - scale) * .5, h * (1 - scale) * .5)
+		love.graphics.scale(scale, scale)
+	end
+
 	love.graphics.draw(backgroundImage, 0, 0)
 	
 	if isGrabbing then
@@ -201,17 +227,36 @@ function love.draw()
 			love.graphics.translate(boat.body:getX(), boat.body:getY())
 
 			local health = boat.health
+
+			local sinking, landed = false, false
+			if boat.ended then
+				sinking = (health == 0)
+				landed = not sinking
+			end
+
+			-- health indicator
+
 			local healthStartX = -((heartImageWidth * BOAT_MAXIMUM_HEALTH) + (heartPadding * (BOAT_MAXIMUM_HEALTH - 1))) / 2 - 4
 			for i = 1, BOAT_MAXIMUM_HEALTH do
 				local heartY = -36
 				heartFraction = (i - 1) / BOAT_MAXIMUM_HEALTH
+				local heartVisibility = 1
+
+				if landed then
+					heartVisibility = math.min(1, math.max(0, 1.0 - (elapsedTime - boat.endTime) / 0.6))
+				end
+
 				if i <= health then
+					-- full heart: bounce it!
 					heartY = heartY - math.pow(math.abs(math.sin(5 * elapsedTime + (boat.rockPhase + heartFraction) * math.pi)), .6) * 4
-				elseif boat.ended then
+				elseif sinking then
 					heartFallAmount = math.min(1, math.max(0, (elapsedTime - boat.endTime) / 0.9 - heartFraction * 0.2))
-					love.graphics.setColor(40, 10, 0, 255 * (1.0 - math.pow(heartFallAmount, 6)))
+					heartVisibility = (1.0 - math.pow(heartFallAmount, 6))
+					
 					heartY = heartY + (2.4 * heartFallAmount * (heartFallAmount - 0.6)) * 60
 				end
+
+				love.graphics.setColor(40, 10, 0, 255 * heartVisibility)
 				love.graphics.draw(i > health and heartEmptyImage or heartFullImage, healthStartX + (heartImageWidth + heartPadding) * (i - 1), heartY)
 			end
 			
@@ -219,12 +264,21 @@ function love.draw()
 
 			local damageFactor = 1 - math.max(0,math.min(1,(elapsedTime - boat.lastDamageTime) / 0.5))
 			
-			local angle = math.sin(3 * elapsedTime + boat.rockPhase * math.pi) * .08 - .05
-			local sinking = (boat.ended == true and boat.health == 0)
+			local rockFrequency = 3
+			local rockAmplitude, rockOffset = 0.08, 0.05
+			if landed then
+				rockFrequency = 1.5
+				rockAmplitude = 0.04
+				rockOffset = 0.01
+			end
+			local angle = math.sin(rockFrequency * elapsedTime + boat.rockPhase * math.pi) * rockAmplitude - rockOffset
+			
 			if sinking then
 				angle = 0
 				
 				local sinkProgress = (elapsedTime - boat.endTime) / BOAT_DISAPPEAR_DURATION
+
+				-- waves
 				local waveProgress = 0
 				if sinkProgress <= 1 then
 					waveProgress = math.min(1.0, sinkProgress * 4)
@@ -235,15 +289,25 @@ function love.draw()
 				love.graphics.setColor(100, 53, 0, waveProgress * 255)
 				love.graphics.draw(wavesImage, 0, boatImageHeight / 2 + 6, 0, 1, 0.3 + waveProgress * 0.7 * (.7 + .3 * math.abs(math.sin(elapsedTime * 5 + boat.rockPhase * math.pi))), wavesImageWidth / 2, wavesImageHeight)
 
+				-- sinking shader
 				love.graphics.setShader(boatShader)
 				boatShader:send("progress", sinkProgress)
 			end
-			love.graphics.setColor(40 + damageFactor * 200, 10, 0,255)
+
+			local boatVisibility = 1
+			if landed then
+				boatVisibility = math.min(1, math.max(0, 1 - (elapsedTime - boat.endTime) / BOAT_DISAPPEAR_DURATION))
+				labelVisibility = boatVisibility
+			end
+
+			-- boat image
+			love.graphics.setColor(40 + damageFactor * 200 + (1 - boatVisibility) * 150, 10 + damageFactor * 40 + (1 - boatVisibility) * 120, 0,255 * boatVisibility)
 			love.graphics.draw(boatImage, -boatImageWidth / 2, -boatImageHeight / 2, angle, 1) -- x, y, rotation, scale
 			if sinking then
 				love.graphics.setShader(nil)
 			end
 
+			-- label
 			local labelImage = labelImages[boat.labelIndex]
 			local labelWidth, labelHeight = labelImage:getDimensions()
 			
@@ -253,8 +317,17 @@ function love.draw()
 			love.graphics.pop()
 		end
 
-		-- TODO: score etc.
+		-- desperation meter
+		local desperationTextWidth, desperationTextHeight = desperationTextImage:getDimensions()
+		love.graphics.setColor(255, 255, 255, 255)
+		love.graphics.draw(desperationTextImage, 805, 512, 0, 1, 1, desperationTextWidth / 2, desperationTextHeight)
+		love.graphics.setColor(122, 61, 17, 230)
+		love.graphics.rectangle("fill", 744, 518, 122 * (desperationLevel / MAX_DESPERATION), 6)
+		love.graphics.setColor(102, 40, 0, 230)
+		love.graphics.setLineWidth(2)
+		love.graphics.rectangle("line", 744, 518, 122, 6)
 	else
+		local textRightMargin = 714
 		-- either title screen or end-game state
 		if not gameOver then
 			-- title screen
@@ -264,14 +337,21 @@ function love.draw()
 			local text1ImageWidth = text1Image:getDimensions()
 			local text2ImageWidth = text2Image:getDimensions()
 			local startImageWidth = startImage:getDimensions()
-
-			local textRightMargin = 714
+			
 			love.graphics.draw(titleImage, textRightMargin - titleImageWidth, 71)
 			love.graphics.draw(text1Image, textRightMargin - text1ImageWidth, 304)
 			love.graphics.draw(text2Image, textRightMargin - text2ImageWidth, 352)
 			love.graphics.draw(startImage, textRightMargin - startImageWidth, 410)
 		else
 			-- end-game
+			love.graphics.setColor(255, 255, 255, 255)
+			local endTitleImageWidth = endTitleImage:getDimensions()
+			local endImage = endImages[whichEnd]
+			local endImageWidth = endImage:getDimensions()
+			local tryAgainImageWidth = tryAgainImage:getDimensions()
+			love.graphics.draw(endTitleImage, textRightMargin - endTitleImageWidth, 71)
+			love.graphics.draw(endImage, textRightMargin - endImageWidth, 330)
+			love.graphics.draw(tryAgainImage, textRightMargin - tryAgainImageWidth, 420)
 		end
 	end
 end
@@ -327,24 +407,30 @@ function love.update(dt)
 			if not boat.ended then
 				if boat.health > 0 then
 					if boat.isGrabbed == false then
-						if boat.moveJoint ~= nil then
-							if collisionImpartedVelocity ~= nil then
-								-- if it just got hit, bounce it off
-								doCollision(boat)
-							else
-								-- move normally (TODO: add some variety to this, few octaves of noise?)
-								local speed = boat.speed
-								if speed < BOAT_SPEED then
-									speed = speed + (BOAT_SPEED * BOAT_ACCELERATION * dt)
-									boat.speed = speed
-								end
-								boat.moveJoint:setTarget(boatPosition.x + boat.speed * dt, boatPosition.y)
-							end
+						if boat.body:getX() > 710 + math.random() * 30 then
+							endBoat(boat)
+							reduceDesperation()
+							if gameOver then break end
 						else
-							-- it’s not being moved — check whether it’s slowed down enough to start moving again
-							local boatVelocityX, boatVelocityY = boat.body:getLinearVelocity()
-							if vLen(v(boatVelocityX, boatVelocityY)) < BOAT_RECOVER_SPEED then
-								setBoatMoving(boat, true)
+							if boat.moveJoint ~= nil then
+								if collisionImpartedVelocity ~= nil then
+									-- if it just got hit, bounce it off
+									doCollision(boat)
+								else
+									-- move normally (TODO: add some variety to this, few octaves of noise?)
+									local speed = boat.speed
+									if speed < BOAT_SPEED then
+										speed = speed + (BOAT_SPEED * BOAT_ACCELERATION * dt)
+										boat.speed = speed
+									end
+									boat.moveJoint:setTarget(boatPosition.x + boat.speed * dt, boatPosition.y)
+								end
+							else
+								-- it’s not being moved — check whether it’s slowed down enough to start moving again
+								local boatVelocityX, boatVelocityY = boat.body:getLinearVelocity()
+								if vLen(v(boatVelocityX, boatVelocityY)) < BOAT_RECOVER_SPEED then
+									setBoatMoving(boat, true)
+								end
 							end
 						end
 					else -- boat is grabbed, but maybe it shouldn’t be — let’s check
@@ -366,6 +452,9 @@ function love.update(dt)
 			table.remove(boats, boatIndicesToRemove[i] - numberOfAlreadyRemovedBoats)
 			numberOfAlreadyRemovedBoats = numberOfAlreadyRemovedBoats + 1
 		end
+
+		-- desperation
+		desperationLevel = math.min(MAX_DESPERATION, desperationLevel + DESPERATION_REGEN_SPEED * dt)
 
 		world:update(dt)
 	end
@@ -406,15 +495,17 @@ function setBoatMoving(boat, moving)
 end
 
 function endBoat(boat)
-	setBoatMoving(boat, false)
-	if boat.isGrabbed then
-		endGrabbing()
+	if not boat.ended then
+		setBoatMoving(boat, false)
+		if boat.isGrabbed then
+			endGrabbing()
+		end
+		boat.fixture:setMask(BOAT_CATEGORY, SIDE_CATEGORY, YOU_CATEGORY)
+		boat.ended = true
+		boat.endTime = elapsedTime
+		boat.collisionImpartedVelocity = nil
+		boat.body:setLinearVelocity(0, 0)
 	end
-	boat.fixture:setMask(BOAT_CATEGORY, SIDE_CATEGORY, YOU_CATEGORY)
-	boat.ended = true
-	boat.endTime = elapsedTime
-	boat.collisionImpartedVelocity = nil
-	boat.body:setLinearVelocity(0, 0)
 end
 
 function doCollision(boat)
@@ -444,10 +535,24 @@ function clearBoats()
 	boats = {}
 end
 
+function reduceDesperation()
+	local amount = 1
+	if desperationLevel - amount < 0.01 then
+		desperationLevel = 0
+		endGame()
+		-- end game
+	else
+		desperationLevel = desperationLevel - amount
+		lastLandingTime = elapsedTime
+	end
+end
+
 function reset()
 	playing = false
 	gameOver = false
 	elapsedTime = 0
+	desperationLevel = MAX_DESPERATION
+	lastLandingTime = -SCREEN_SHAKE_DURATION
 	
 	youJoint:setTarget(STARTING_POSITION.x, STARTING_POSITION.y)
 	you.body:setX(STARTING_POSITION.x)
@@ -459,6 +564,13 @@ end
 function start()
 	playing = true
 	lastBoatTime = elapsedTime
+end
+
+function endGame()
+	playing = false
+	gameOver = true
+	whichEnd = math.random(NUMBER_OF_ENDS)
+	clearBoats()
 end
 
 function checkGrab()
