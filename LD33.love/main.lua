@@ -25,6 +25,8 @@ local gameOver = false
 local isGrabbing = false
 local grabbedBoats = {}
 
+local youShader
+
 WALL_THICKNESS = 40
 SHORE_WIDTH = 220
 SIDE_CATEGORY = 3
@@ -132,6 +134,8 @@ function love.load()
 
 	youJoint = love.physics.newMouseJoint(you.body, 0, 0)
 
+	youShader = love.graphics.newShader("you.fsh")
+
 	-- get gameplay stuff ready
 
 	for i = 1, 3 do
@@ -155,7 +159,9 @@ function love.draw()
 		local youImageWidth, youImageHeight = youImage:getDimensions()
 		love.graphics.push()
 		love.graphics.translate(you.body:getX(), you.body:getY())
+		love.graphics.setShader(youShader)
 		love.graphics.draw(youImage, -youImageWidth / 2, -youImageHeight / 2, 0, 1)
+		love.graphics.setShader(nil)
 		love.graphics.pop()
 
 		local boatImageWidth, boatImageHeight = boatImage:getDimensions()
@@ -240,6 +246,7 @@ function love.update(dt)
 			lastBoatTime = elapsedTime
 		end
 
+		-- grabbing
 		checkGrab()
 
 		-- boat movement
@@ -274,6 +281,9 @@ function love.update(dt)
 				end
 			end
 		end
+
+		youShader:send("time", elapsedTime)
+		youShader:send("grabbing", (isGrabbing and 1 or 0))
 
 		world:update(dt)
 	end
