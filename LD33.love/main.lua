@@ -34,6 +34,7 @@ local grabbedBoats = {}
 
 local youShader
 local boatShader -- used to mess with the texture coordinates when sinking
+local textShader
 
 local backgroundMusic
 
@@ -126,7 +127,7 @@ function love.load()
 
 	backgroundMusic = love.audio.newSource("sounds/background.mp3")
 	backgroundMusic:setLooping(true)
-	-- backgroundMusic:play()
+	backgroundMusic:play()
 
 	-- physics
 
@@ -172,6 +173,7 @@ function love.load()
 
 	youShader = love.graphics.newShader("you.fsh")
 	boatShader = love.graphics.newShader("boat.fsh")
+	textShader = love.graphics.newShader("text.fsh")
 
 	-- get gameplay stuff ready
 
@@ -327,6 +329,8 @@ function love.draw()
 		love.graphics.setLineWidth(2)
 		love.graphics.rectangle("line", 744, 518, 122, 6)
 	else
+		love.graphics.setShader(textShader)
+		textShader:send("time", elapsedTime)
 		local textRightMargin = 714
 		-- either title screen or end-game state
 		if not gameOver then
@@ -338,7 +342,12 @@ function love.draw()
 			local text2ImageWidth = text2Image:getDimensions()
 			local startImageWidth = startImage:getDimensions()
 			
+			textShader:send("multiplier", 0.6)
+			love.graphics.setColor(255, 255, 255, 60)
+			love.graphics.draw(titleImage, textRightMargin - titleImageWidth, 74)
+			love.graphics.setColor(255, 255, 255, 255)
 			love.graphics.draw(titleImage, textRightMargin - titleImageWidth, 71)
+			textShader:send("multiplier", 0.8)
 			love.graphics.draw(text1Image, textRightMargin - text1ImageWidth, 304)
 			love.graphics.draw(text2Image, textRightMargin - text2ImageWidth, 352)
 			love.graphics.draw(startImage, textRightMargin - startImageWidth, 410)
@@ -349,10 +358,16 @@ function love.draw()
 			local endImage = endImages[whichEnd]
 			local endImageWidth = endImage:getDimensions()
 			local tryAgainImageWidth = tryAgainImage:getDimensions()
+			textShader:send("multiplier", 0.6)
+			love.graphics.setColor(255, 255, 255, 60)
+			love.graphics.draw(endTitleImage, textRightMargin - endTitleImageWidth, 74)
+			love.graphics.setColor(255, 255, 255, 255)
 			love.graphics.draw(endTitleImage, textRightMargin - endTitleImageWidth, 71)
+			textShader:send("multiplier", 0.8)
 			love.graphics.draw(endImage, textRightMargin - endImageWidth, 330)
-			love.graphics.draw(tryAgainImage, textRightMargin - tryAgainImageWidth, 420)
+			love.graphics.draw(tryAgainImage, textRightMargin - tryAgainImageWidth, 410)
 		end
+		love.graphics.setShader(nil)
 	end
 end
 
