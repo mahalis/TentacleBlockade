@@ -17,6 +17,7 @@ local targetPosition = nil
 local backgroundImage
 local boatImage
 local youNormalImage, youGrabbyImage
+local heartFullImage, heartEmptyImage
 
 local playing = false
 local gameOver = false
@@ -37,7 +38,7 @@ YOU_RADIUS = 18
 BOAT_SPEED = 160
 BOAT_ACCELERATION = 0.4 -- multiplied by max speed
 GRAB_DISTANCE = 60
-GRAB_HOLD_DISTANCE = GRAB_DISTANCE * .7
+GRAB_HOLD_DISTANCE = GRAB_DISTANCE * .2
 BOAT_RECOVER_SPEED = 10
 BOAT_IMPACT_THRESHOLD = 60
 BOAT_DAMAGE_INTERVAL = 1
@@ -80,6 +81,8 @@ function love.load()
 	boatImage = love.graphics.newImage("graphics/boat.png")
 	youNormalImage = love.graphics.newImage("graphics/you normal.png")
 	youGrabbyImage = love.graphics.newImage("graphics/you grabby.png")
+	heartEmptyImage = love.graphics.newImage("graphics/heart empty.png")
+	heartFullImage = love.graphics.newImage("graphics/heart full.png")
 	-- fonts
 
 	scoreBigFont = love.graphics.newFont(30)
@@ -156,16 +159,26 @@ function love.draw()
 		love.graphics.pop()
 
 		local boatImageWidth, boatImageHeight = boatImage:getDimensions()
+		local heartImageWidth, heartImageHeight = heartFullImage:getDimensions()
+		local heartPadding = 3
+
 		-- boats
 		for i = 1, #boats do
 			local boat = boats[i]
+
+			love.graphics.setColor(40, 10, 0, 255)
 			love.graphics.push()
 			love.graphics.translate(boat.body:getX(), boat.body:getY())
 
-			love.graphics.setColor(40, 10, 0, 255)
-			-- temporary health bar
-			love.graphics.rectangle("line", -30, -40, 60, 6)
-			love.graphics.rectangle("fill", -30, -40, 60 * (boat.health / BOAT_MAXIMUM_HEALTH), 6)
+			local health = boat.health
+			local healthStartX = -((heartImageWidth * BOAT_MAXIMUM_HEALTH) + (heartPadding * (BOAT_MAXIMUM_HEALTH - 1))) / 2 - 4
+			for i = 1, BOAT_MAXIMUM_HEALTH do
+				local heartY = -36
+				if i <= health then
+					heartY = heartY - math.pow(math.abs(math.sin(5 * elapsedTime + (boat.rockPhase + (i / BOAT_MAXIMUM_HEALTH)) * math.pi)), .6) * 4
+				end
+				love.graphics.draw(i > health and heartEmptyImage or heartFullImage, healthStartX + (heartImageWidth + heartPadding) * (i - 1), heartY)
+			end
 			
 			-- TODO: labels (pre-rotation)
 			local damageFactor = 1 - math.max(0,math.min(1,(elapsedTime - boat.lastDamageTime) / 0.5))
