@@ -619,7 +619,9 @@ function endGrabbing()
 		isGrabbing = false
 		for i = 1, #grabbedBoats do
 			local boat = grabbedBoats[i]
-			boat.grabJoint:destroy()
+			if not boat.grabJoint:isDestroyed() then
+				boat.grabJoint:destroy()
+			end
 			boat.grabJoint = nil
 			boat.isGrabbed = false
 		end
